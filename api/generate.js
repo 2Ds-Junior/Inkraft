@@ -52,24 +52,29 @@ Structure exacte :
   "conclusion": "2-3 paragraphes séparés par \\n\\n"
 }
 Génère exactement ${chapters} chapitres avec 2 sections chacun. Sois concis.`;
-
-    const gemRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
+const gemRes = await fetch(
+      'https://api.groq.com/openai/v1/chat/completions',
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`
+        },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 16000 }
+          model: 'llama-3.3-70b-versatile',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.7,
+          max_tokens: 16000
         })
       }
     );
 
     const gemData = await gemRes.json();
 
-    if (!gemRes.ok) throw new Error(gemData.error?.message || 'Erreur Gemini');
+    if (!gemRes.ok) throw new Error(gemData.error?.message || 'Erreur Groq');
 
-    let raw = gemData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    let raw = gemData.choices?.[0]?.message?.content || '';
+  
     raw = raw.replace(/^```json\s*/,'').replace(/\s*```$/,'').trim();
 
     let ebook;
