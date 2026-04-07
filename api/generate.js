@@ -7,7 +7,7 @@ export default async function handler(req, res) {
 
   try {
     const { title, subtitle, author, topic, chapters, language, style } = req.body;
-    const GEMINI_KEY = process.env.GEMINI_API_KEY;
+    const GROQ_KEY = process.env.GROQ_API_KEY;
     const UNSPLASH_KEY = process.env.UNSPLASH_ACCESS_KEY;
 
     const lm = { fr: 'français', en: 'English', es: 'español', de: 'Deutsch', it: 'italiano', pt: 'português', ar: 'arabe' };
@@ -20,76 +20,101 @@ export default async function handler(req, res) {
       practical: 'pratique, actionnable, step-by-step'
     };
 
-    const prompt = `Tu es un auteur expert. Génère un ebook complet.
-Titre : "${title}"
-${subtitle ? `Sous-titre : "${subtitle}"` : ''}
-Auteur : "${author}"
-Sujet : "${topic}"
-Chapitres : ${chapters}
-Langue : ${lm[language] || 'français'}
-Style : ${sm[style] || 'professionnel'}
+    const lang = lm[language] || 'français';
+    const sty = sm[style] || 'professionnel';
 
-Retourne UNIQUEMENT un JSON valide, sans texte avant ou après, sans backticks.
-Structure exacte :
-{
-  "title": "${title}",
-  "subtitle": "${subtitle || 'sous-titre accrocheur'}",
-  "author": "${author}",
-  "imageQuery": "keyword in english for cover image",
-  "description": "2-3 paragraphes intro séparés par \\n\\n",
-  "chapters": [
-    {
-      "number": 1,
-      "title": "Titre chapitre",
-      "imageQuery": "keyword in english",
-      "introduction": "2-3 phrases intro",
-      "sections": [
-        {"title": "Titre section", "paragraphs": ["paragraphe de 3 phrases minimum"]}
-      ],
-      "keyPoints": ["Point 1", "Point 2", "Point 3"]
-    }
-  ],
-  "conclusion": "2-3 paragraphes séparés par \\n\\n"
-}
-Génère exactement ${chapters} chapitres avec 2 sections chacun. Sois concis.`;
-const gemRes = await fetch(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
+    const groq = async (prompt, max_tokens = 4000) => {
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`
+          'Authorization': `Bearer ${GROQ_KEY}`
         },
         body: JSON.stringify({
           model: 'llama-3.3-70b-versatile',
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.7,
-          max_tokens: 16000
+          max_tokens
         })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error?.message || 'Erreur Groq');
+      return data.choices?.[0]?.message?.content || '';
+    };
+
+    const parseJSON = (raw) => {
+      raw = raw.replace(/^```json\s*/,'').replace(/\s*```$/,'').trim();
+      try { return JSON.parse(raw); }
+      catch {
+        const m = raw.match(/\{[\s\S]*\}/);
+        if (m) return JSON.parse(m[0]);
+        throw new Error('JSON invalide');
       }
-    );
+    };
 
-    const gemData = await gemRes.json();
+    // ── ÉTAPE 1 : Structure générale ──
+    const structPrompt = `Tu es un auteur expert. Génère la structure d'un ebook.
+Titre : "${title}"
+${subtitle ? `Sous-titre : "${subtitle}"` : ''}
+Auteur : "${author}"
+Sujet : "${topic}"
+Langue : ${lang}
+Style : ${sty}
 
-    if (!gemRes.ok) throw new Error(gemData.error?.message || 'Erreur Groq');
+Retourne UNIQUEMENT ce JSON (sans texte avant/après, sans backticks) :
+{
+  "title": "${title}",
+  "subtitle": "${subtitle || 'sous-titre accrocheur'}",
+  "author": "${author}",
+  "imageQuery": "keyword in english for cover",
+  "description": "introduction en 2 paragraphes séparés par \\n\\n",
+  "chapterTitles": ["Titre chapitre 1", "Titre chapitre 2", "Titre chapitre 3"],
+  "conclusion": "conclusion en 2 paragraphes séparés par \\n\\n"
+}
+Génère exactement ${chapters} titres de chapitres.`;
 
-    let raw = gemData.choices?.[0]?.message?.content || '';
-  
-    raw = raw.replace(/^```json\s*/,'').replace(/\s*```$/,'').trim();
+    const structure = parseJSON(await groq(structPrompt, 2000));
 
-    let ebook;
-    try {
-      ebook = JSON.parse(raw);
-    } catch(e) {
-      const m = raw.match(/\{[\s\S]*\}/);
-      if (m) {
-        try { ebook = JSON.parse(m[0]); }
-        catch(e2) { throw new Error('JSON invalide - réessayez'); }
-      } else {
-        throw new Error('Réponse invalide - réessayez');
+    // ── ÉTAPE 2 : Générer chaque chapitre ──
+    const chapterList = [];
+    for (let i = 0; i < structure.chapterTitles.length; i++) {
+      const chTitle = structure.chapterTitles[i];
+      const chPrompt = `Tu es un auteur expert. Rédige le chapitre ${i+1} d'un ebook.
+Titre de l'ebook : "${title}"
+Sujet : "${topic}"
+Langue : ${lang}
+Style : ${sty}
+Titre du chapitre : "${chTitle}"
+
+Retourne UNIQUEMENT ce JSON (sans texte avant/après, sans backticks) :
+{
+  "number": ${i+1},
+  "title": "${chTitle}",
+  "imageQuery": "keyword in english for this chapter",
+  "introduction": "3-4 phrases d'introduction du chapitre",
+  "sections": [
+    {
+      "title": "Titre section 1",
+      "paragraphs": ["paragraphe de 4 phrases minimum", "paragraphe de 4 phrases minimum"]
+    },
+    {
+      "title": "Titre section 2",
+      "paragraphs": ["paragraphe de 4 phrases minimum", "paragraphe de 4 phrases minimum"]
+    }
+  ],
+  "keyPoints": ["Point clé 1", "Point clé 2", "Point clé 3", "Point clé 4"]
+}`;
+
+      const chapter = parseJSON(await groq(chPrompt, 3000));
+      chapterList.push(chapter);
+
+      // Pause pour éviter le rate limit
+      if (i < structure.chapterTitles.length - 1) {
+        await new Promise(r => setTimeout(r, 1000));
       }
     }
 
+    // ── ÉTAPE 3 : Images ──
     const fetchImg = async (query) => {
       try {
         const r = await fetch(
@@ -104,6 +129,16 @@ const gemRes = await fetch(
     const aiImg = (query) =>
       `https://image.pollinations.ai/prompt/${encodeURIComponent(query + ' professional illustration')}?width=800&height=400&nologo=true`;
 
+    const ebook = {
+      title: structure.title,
+      subtitle: structure.subtitle,
+      author: structure.author,
+      imageQuery: structure.imageQuery,
+      description: structure.description,
+      chapters: chapterList,
+      conclusion: structure.conclusion
+    };
+
     ebook.coverImage = await fetchImg(ebook.imageQuery || title);
     ebook.coverImageAI = aiImg(ebook.imageQuery || title);
 
@@ -113,6 +148,7 @@ const gemRes = await fetch(
     }
 
     res.status(200).json(ebook);
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
