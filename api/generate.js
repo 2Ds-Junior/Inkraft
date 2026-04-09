@@ -24,7 +24,7 @@ export default async function handler(req, res) {
     const sty = sm[style] || 'professionnel';
 
     const groq = async (prompt, max_tokens = 4000) => {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -37,8 +37,8 @@ export default async function handler(req, res) {
           max_tokens
         })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || 'Erreur Groq');
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error?.message || 'Erreur Groq');
       return data.choices?.[0]?.message?.content || '';
     };
 
@@ -51,14 +51,15 @@ export default async function handler(req, res) {
         throw new Error('JSON invalide');
       }
     };
+
     const cleanText = (str) => {
       if (!str) return str;
       return str
-    .replace(/%Æ/g, '')
-    .replace(/%[A-F0-9]{2}/gi, '')
-    .replace(/[^\x00-\x7F\u00C0-\u024F\u1E00-\u1EFF\n]/g, '')
-    .trim();
-};
+        .replace(/%Æ/g, '')
+        .replace(/%[A-F0-9]{2}/gi, '')
+        .replace(/[^\x00-\x7F\u00C0-\u024F\u1E00-\u1EFF\n]/g, '')
+        .trim();
+    };
 
     // ── ÉTAPE 1 : Structure générale ──
     const structPrompt = `Tu es un auteur expert. Génère la structure d'un ebook.
@@ -82,13 +83,11 @@ Retourne UNIQUEMENT ce JSON (sans texte avant/après, sans backticks) :
 Génère exactement ${chapters} titres de chapitres.`;
 
     const structure = parseJSON(await groq(structPrompt, 2000));
-    const chapter = parseJSON(await groq(chPrompt, 3000));
-// ← AJOUTE ICI
-if (chapter.keyPoints) chapter.keyPoints = chapter.keyPoints.map(kp => cleanText(kp));
-if (chapter.introduction) chapter.introduction = cleanText(chapter.introduction);
-chapter.sections?.forEach(sec => {
-  sec.paragraphs = sec.paragraphs?.map(p => cleanText(p));
-});
+
+    // Nettoyage structure
+    if (structure.description) structure.description = cleanText(structure.description);
+    if (structure.conclusion) structure.conclusion = cleanText(structure.conclusion);
+    if (structure.chapterTitles) structure.chapterTitles = structure.chapterTitles.map(t => cleanText(t));
 
     // ── ÉTAPE 2 : Générer chaque chapitre ──
     const chapterList = [];
@@ -121,15 +120,16 @@ Retourne UNIQUEMENT ce JSON (sans texte avant/après, sans backticks) :
 }`;
 
       const chapter = parseJSON(await groq(chPrompt, 3000));
-// ← AJOUTE ICI
-if (chapter.keyPoints) chapter.keyPoints = chapter.keyPoints.map(kp => cleanText(kp));
-if (chapter.introduction) chapter.introduction = cleanText(chapter.introduction);
-chapter.sections?.forEach(sec => {
-  sec.paragraphs = sec.paragraphs?.map(p => cleanText(p));
-});
+
+      // Nettoyage chapitre
+      if (chapter.keyPoints) chapter.keyPoints = chapter.keyPoints.map(kp => cleanText(kp));
+      if (chapter.introduction) chapter.introduction = cleanText(chapter.introduction);
+      chapter.sections?.forEach(sec => {
+        sec.paragraphs = sec.paragraphs?.map(p => cleanText(p));
+      });
+
       chapterList.push(chapter);
 
-      // Pause pour éviter le rate limit
       if (i < structure.chapterTitles.length - 1) {
         await new Promise(r => setTimeout(r, 1000));
       }
