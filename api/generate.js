@@ -52,14 +52,17 @@ export default async function handler(req, res) {
       }
     };
 
-    const cleanText = (str) => {
-      if (!str) return str;
-      return str
-        .replace(/%Æ/g, '')
-        .replace(/%[A-F0-9]{2}/gi, '')
-        .replace(/[^\x00-\x7F\u00C0-\u024F\u1E00-\u1EFF\n]/g, '')
-        .trim();
-    };
+   const cleanText = (str) => {
+  if (!str) return str;
+  return str
+    .replace(/[\u2022\u2023\u25E6\u2043\u2219]/g, '-') // bullets
+    .replace(/[\u2018\u2019]/g, "'")                    // guillemets courbes
+    .replace(/[\u201C\u201D]/g, '"')                    // guillemets doubles
+    .replace(/[\u2013\u2014]/g, '-')                    // tirets longs
+    .replace(/[\u2026]/g, '...')                        // ellipse
+    .replace(/[^\x00-\x7F\u00C0-\u024F\u1E00-\u1EFF\n\r\t ]/g, '') // reste
+    .trim();
+};
 
     // ── ÉTAPE 1 : Structure générale ──
     const structPrompt = `Tu es un auteur expert. Génère la structure d'un ebook.
@@ -119,7 +122,7 @@ Retourne UNIQUEMENT ce JSON (sans texte avant/après, sans backticks) :
   "keyPoints": ["Point clé 1", "Point clé 2", "Point clé 3", "Point clé 4"]
 }`;
 
-      const chapter = parseJSON(await groq(chPrompt, 3000));
+      const chapter = parseJSON(await groq(chPrompt, 2500));
 
       // Nettoyage chapitre
       if (chapter.keyPoints) chapter.keyPoints = chapter.keyPoints.map(kp => cleanText(kp));
@@ -131,7 +134,7 @@ Retourne UNIQUEMENT ce JSON (sans texte avant/après, sans backticks) :
       chapterList.push(chapter);
 
       if (i < structure.chapterTitles.length - 1) {
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 8000));
       }
     }
 
